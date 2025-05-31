@@ -1,5 +1,5 @@
 streamlit
+requests
 pandas
-geopy
-pydeck
-fpdf
+folium
+streamlit-folium
