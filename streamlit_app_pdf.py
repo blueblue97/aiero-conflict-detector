@@ -1,75 +1,62 @@
 import streamlit as st
 import json
 import requests
-import pydeck as pdk
+import pandas as pd
+import folium
+from streamlit_folium import st_folium
+
 from opensky_fetch import fetch_opensky_data
 from sky_brain import detect_conflicts
 
 # Load credentials
 with open("credentials.json") as file:
     creds = json.load(file)
-    client_id = creds["client_id"]
-    client_secret = creds["client_secret"]
+client_id = creds["client_id"]
+client_secret = creds["client_secret"]
 
-# Set page title and layout
-st.set_page_config(page_title="🛫 AIero Sky Brain", layout="wide")
-st.title("🧠 Sky Brain – Live Conflict Detection Dashboard")
+# Title
+st.set_page_config(page_title="AIero Conflict Detector", layout="wide")
+st.title("🛰️ Sky Brain — Conflict Detection System")
 
-# Fetch live OpenSky data
+# Live data
 data = fetch_opensky_data(client_id, client_secret)
 
 if data:
     st.success("✅ Live data received!")
-    
-    # Display raw JSON
-    with st.expander("📦 Raw JSON Data"):
+
+    col1, col2 = st.columns([1, 1.5])
+
+    with col1:
+        st.subheader("📄 Raw JSON Data")
         st.json(data)
 
-    # Detect conflicts using AI logic
+    with col2:
+        st.subheader("🗺️ Aircraft Positions Map")
+        m = folium.Map(location=[20, 0], zoom_start=2)
+
+        for state in data.get("states", []):
+            try:
+                lat = state[6]
+                lon = state[5]
+                callsign = state[1].strip() if state[1] else "N/A"
+                if lat is not None and lon is not None:
+                    folium.Marker(
+                        location=[lat, lon],
+                        popup=f"Callsign: {callsign}",
+                        icon=folium.Icon(color="blue", icon="plane", prefix="fa")
+                    ).add_to(m)
+            except Exception:
+                continue
+
+        st_data = st_folium(m, width=700, height=500)
+
+    # Conflict detection
     conflicts = detect_conflicts(data)
-
-    # Display map
-    st.subheader("🗺️ Aircraft Map")
-    
-    states = data.get("states", [])
-    aircraft_data = [
-        {
-            "icao24": s[0],
-            "callsign": s[1].strip() if s[1] else "",
-            "origin_country": s[2],
-            "longitude": s[5],
-            "latitude": s[6],
-            "altitude": s[7]
-        }
-        for s in states if s[5] is not None and s[6] is not None
-    ]
-
-    df = pd.DataFrame(aircraft_data)
-
-    st.pydeck_chart(pdk.Deck(
-        initial_view_state=pdk.ViewState(
-            latitude=37.7749,
-            longitude=-95,
-            zoom=3,
-            pitch=0,
-        ),
-        layers=[
-            pdk.Layer(
-                "ScatterplotLayer",
-                data=df,
-                get_position='[longitude, latitude]',
-                get_color='[0, 0, 255, 160]',
-                get_radius=30000,
-            ),
-        ],
-    ))
-
-    # Display conflict alerts
     if conflicts:
-        st.subheader("🚨 Potential Conflicts Detected")
+        st.warning("⚠️ Potential conflicts detected!")
         for conflict in conflicts:
-            st.error(conflict)
+            st.write(conflict)
     else:
-        st.success("✅ No immediate conflicts detected.")
+        st.info("✅ No conflicts detected.")
 else:
-    st.error("❌ Failed to load live data from OpenSky.")
+    st.error("❌ Failed to fetch data from OpenSky.")
