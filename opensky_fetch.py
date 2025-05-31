@@ -2,42 +2,38 @@ import streamlit as st
 import requests
 import json
 
-# Load OpenSky credentials
-with open("credentials.json", "r") as file:
+# Load credentials
+with open("credentials.json") as file:
     creds = json.load(file)
 
-client_id = creds["clientId"]
-client_secret = creds["clientSecret"]
+client_id = creds["client_id"]
+client_secret = creds["client_secret"]
 
-# Get access token using client credentials flow
-def get_token():
-    url = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
-    data = {
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret
-    }
-    response = requests.post(url, data=data)
-    return response.json().get("access_token", None)
+# Get access token
+auth_url = "https://login.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
+auth_data = {
+    "grant_type": "client_credentials",
+    "client_id": client_id,
+    "client_secret": client_secret
+}
 
-# Fetch live state vectors (aircraft data)
-def fetch_data(token):
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get("https://opensky-network.org/api/states/all", headers=headers)
-    if response.status_code == 200:
-        return response.json()
-    return None
-
-# Streamlit app UI
-st.title("🌍 Live Aircraft Data Viewer (OpenSky API)")
-
-token = get_token()
-if token:
-    data = fetch_data(token)
-    if data:
-        st.success("✅ Live data received!")
-        st.json(data)
-    else:
-        st.warning("⚠️ No aircraft data returned.")
-else:
+auth_response = requests.post(auth_url, data=auth_data)
+if auth_response.status_code != 200:
     st.error("❌ Failed to get access token.")
+    st.stop()
+
+access_token = auth_response.json()["access_token"]
+
+# Get live state vector data from OpenSky
+headers = {"Authorization": f"Bearer {access_token}"}
+data_url = "https://opensky-network.org/api/states/all"
+response = requests.get(data_url, headers=headers)
+
+# Display results
+st.title("🌍 Live Aircraft Data Viewer (OpenSky API)")
+if response.status_code == 200:
+    data = response.json()
+    st.success("✅ Live aircraft data retrieved!")
+    st.write(data)
+else:
+    st.error("❌ Failed to retrieve aircraft data.")
