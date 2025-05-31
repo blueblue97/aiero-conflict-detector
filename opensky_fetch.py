@@ -1,32 +1,38 @@
-
-import requests
-from requests.auth import HTTPBasicAuth
-import pandas as pd
 import streamlit as st
+import requests
+import json
 
-# UI
-st.title("🌍 Live Aircraft Data Viewer (OpenSky)")
-st.write("Real-time flight data from OpenSky Network")
+# Load credentials
+with open("credentials.json", "r") as f:
+    creds = json.load(f)
 
-username = st.text_input("Enter OpenSky Username")
-password = st.text_input("Enter OpenSky Password", type="password")
+client_id = creds["client_id"]
+client_secret = creds["client_secret"]
 
-if username and password:
-    with st.spinner("Fetching data..."):
-        url = "https://opensky-network.org/api/states/all"
+# Get access token
+auth_response = requests.post(
+    "https://login.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token",
+    data={
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret
+    }
+)
 
-        try:
-            response = requests.get(url, auth=HTTPBasicAuth(username, password))
-            data = response.json()
+if auth_response.status_code != 200:
+    st.error("Auth failed: " + auth_response.text)
+    st.stop()
 
-            if data and "states" in data:
-                df = pd.DataFrame(data["states"], columns=[
-                    "icao24", "callsign", "origin_country", "time_position", "last_contact",
-                    "longitude", "latitude", "baro_altitude", "on_ground", "velocity", "heading",
-                    "vertical_rate", "sensors", "geo_altitude", "squawk", "spi", "position_source"
-                ])
-                st.dataframe(df[["icao24", "callsign", "origin_country", "latitude", "longitude", "velocity"]])
-            else:
-                st.error("No data returned.")
-        except Exception as e:
-            st.error(f"Error: {e}")
+access_token = auth_response.json()["access_token"]
+
+# Fetch OpenSky data
+headers = {"Authorization": f"Bearer {access_token}"}
+response = requests.get("https://opensky-network.org/api/states/all", headers=headers)
+
+st.title("Live Aircraft Data Viewer (OpenSky)")
+
+if response.status_code == 200:
+    data = response.json()
+    st.write(data)
+else:
+    st.error("Failed to fetch data: " + response.text)
