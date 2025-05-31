@@ -1,39 +1,38 @@
+import pandas as pd
+import pydeck as pdk
 
-import math
+def visualize_conflicts_on_map(data):
+    if not data or "states" not in data or not data["states"]:
+        return None
 
-# Function to calculate distance between two coordinates (Haversine formula)
-def haversine_distance(lat1, lon1, lat2, lon2):
-    R = 6371  # Radius of Earth in kilometers
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
+    columns = [
+        "icao24", "callsign", "origin_country", "time_position", "last_contact",
+        "longitude", "latitude", "baro_altitude", "on_ground", "velocity",
+        "heading", "vertical_rate", "sensors", "geo_altitude", "squawk",
+        "spi", "position_source"
+    ]
 
-    a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c * 1000  # Return distance in meters
+    df = pd.DataFrame(data["states"], columns=columns)
+    df = df.dropna(subset=["latitude", "longitude", "geo_altitude"])
 
-# Core function to detect conflicts in aircraft states
-def detect_conflicts(states, horizontal_threshold=5000, vertical_threshold=300):
-    conflicts = []
-    for i in range(len(states)):
-        for j in range(i+1, len(states)):
-            a1 = states[i]
-            a2 = states[j]
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=df,
+        get_position='[longitude, latitude]',
+        get_color='[200, 30, 0, 160]',
+        get_radius=500,
+        pickable=True
+    )
 
-            if not all([a1[5], a1[6], a1[7], a2[5], a2[6], a2[7]]):
-                continue  # skip if data missing
+    view_state = pdk.ViewState(
+        latitude=df["latitude"].mean(),
+        longitude=df["longitude"].mean(),
+        zoom=4,
+        pitch=40
+    )
 
-            lat1, lon1, alt1 = a1[6], a1[5], a1[7]
-            lat2, lon2, alt2 = a2[6], a2[5], a2[7]
-
-            h_dist = haversine_distance(lat1, lon1, lat2, lon2)
-            v_dist = abs(alt1 - alt2)
-
-            if h_dist < horizontal_threshold and v_dist < vertical_threshold:
-                conflicts.append({
-                    "aircraft_1": a1[0],
-                    "aircraft_2": a2[0],
-                    "horizontal_distance_m": h_dist,
-                    "vertical_distance_m": v_dist
-                })
-    return conflicts
+    return pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        tooltip={"text": "Altitude: {geo_altitude}\nVelocity: {velocity}\nCountry: {origin_country}"}
+    )
