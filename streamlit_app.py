@@ -1,39 +1,33 @@
 import streamlit as st
 import pandas as pd
-import folium
-from streamlit_folium import folium_static
-from sky_brain import detect_conflicts
+from io import StringIO
 
-# UI Setup
-st.set_page_config(page_title="AIero Conflict Detector")
-st.title("🧠 Sky Brain — Upload Conflict Detection")
+# Function to detect conflicts in flight data
+def detect_conflicts(df):
+    conflicts = []
+    for i in range(len(df)):
+        for j in range(i + 1, len(df)):
+            same_time = df.iloc[i]["time"] == df.iloc[j]["time"]
+            close_lat = abs(df.iloc[i]["latitude"] - df.iloc[j]["latitude"]) < 0.1
+            close_lon = abs(df.iloc[i]["longitude"] - df.iloc[j]["longitude"]) < 0.1
+            close_alt = abs(df.iloc[i]["altitude"] - df.iloc[j]["altitude"]) < 1000
+            if same_time and close_lat and close_lon and close_alt:
+                conflicts.append((i, j))
+    return conflicts
 
-# File Upload
-uploaded_file = st.file_uploader("Upload a CSV file with aircraft data", type="csv")
+st.set_page_config(page_title="CSV Conflict Detector")
+st.title("📄 Upload CSV for Conflict Detection")
 
+uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
-    st.success("✅ File uploaded successfully!")
-    st.write("### Data Preview:")
+    st.subheader("Flight Data")
     st.dataframe(df)
 
-    # Detect conflicts
     conflicts = detect_conflicts(df)
-
     if conflicts:
-        st.warning("⚠️ Potential Conflicts Detected:")
-        for conflict in conflicts:
-            st.write(conflict)
-
-        # Show map
-        m = folium.Map(location=[conflicts[0]['lat1'], conflicts[0]['lon1']], zoom_start=6)
-        for conflict in conflicts:
-            folium.Marker(location=[conflict['lat1'], conflict['lon1']], tooltip="Aircraft 1").add_to(m)
-            folium.Marker(location=[conflict['lat2'], conflict['lon2']], tooltip="Aircraft 2").add_to(m)
-        st.write("### Conflict Locations Map")
-        folium_static(m)
+        st.error(f"⚠️ {len(conflicts)} potential conflict(s) detected!")
+        for c in conflicts:
+            st.write(f"Conflict between flight {c[0]} and flight {c[1]}")
     else:
-        st.success("✅ No conflicts detected in the uploaded data.")
-
-else:
-    st.info("📂 Please upload a CSV file to begin analysis.")
+        st.success("✅ No conflicts detected.")
