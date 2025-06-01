@@ -1,5 +1,5 @@
 streamlit
 pandas
 folium
-streamlit-folium
-opensky-api
+streanlit-folium==0.11.2
+requests
