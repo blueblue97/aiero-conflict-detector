@@ -1,75 +1,69 @@
-import pandas as pd
+
 import streamlit as st
-import streamlit.components.v1 as components
+import pandas as pd
 import folium
-from folium.plugins import MarkerCluster
+from streamlit_folium import st_folium
+from opensky_api import OpenSkyApi
+from datetime import datetime
 
-# --- UI ---
-st.set_page_config(page_title="AIero Conflict Detector", layout="wide")
-st.title("✈️ AIero Conflict Detector")
-st.markdown("Upload a CSV with flight data. If there are conflicts, you'll see them below and on the interactive map.")
+# Function to detect conflicts from CSV
+def detect_conflicts(df):
+    conflicts = []
+    for i in range(len(df)):
+        for j in range(i + 1, len(df)):
+            same_time = df.iloc[i]["time"] == df.iloc[j]["time"]
+            close_lat = abs(df.iloc[i]["lat"] - df.iloc[j]["lat"]) < 0.1
+            close_lon = abs(df.iloc[i]["lon"] - df.iloc[j]["lon"]) < 0.1
+            close_alt = abs(df.iloc[i]["altitude"] - df.iloc[j]["altitude"]) < 1000
+            if same_time and close_lat and close_lon and close_alt:
+                conflicts.append((i, j))
+    return conflicts
 
-# --- File Upload ---
-uploaded_file = st.file_uploader("📂 Upload flight CSV", type=["csv"])
+# Title
+st.title("🛫 AIero Conflict Detector: CSV Upload + Real-Time OpenSky Overlay")
 
+# Upload CSV
+uploaded_file = st.file_uploader("Upload Flight CSV", type="csv")
+
+# Initialize Folium map
+m = folium.Map(location=[39.8283, -98.5795], zoom_start=4, tiles="cartodbpositron")
+
+# Plot real-time OpenSky data
+try:
+    api = OpenSkyApi()
+    states = api.get_states()
+    if states and states.states:
+        for s in states.states:
+            if s.latitude is not None and s.longitude is not None:
+                popup = f"Callsign: {s.callsign.strip()}<br>Altitude: {s.baro_altitude} m"
+                folium.CircleMarker(
+                    location=[s.latitude, s.longitude],
+                    radius=4,
+                    color="blue",
+                    fill=True,
+                    fill_opacity=0.7,
+                    popup=popup,
+                ).add_to(m)
+except Exception as e:
+    st.warning(f"Could not fetch OpenSky data: {e}")
+
+# If CSV uploaded
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
+    if "lat" in df.columns and "lon" in df.columns:
+        st.success("CSV loaded successfully.")
+        conflicts = detect_conflicts(df)
 
-    st.subheader("📋 Flight Data")
-    st.dataframe(df)
+        # Plot conflicting flights
+        for i, j in conflicts:
+            for idx in (i, j):
+                row = df.iloc[idx]
+                popup = f"Flight: {row['flight_id']}<br>Altitude: {row['altitude']}<br>Time: {row['time']}"
+                folium.Marker(
+                    location=[row["lat"], row["lon"]],
+                    popup=popup,
+                    icon=folium.Icon(color="red", icon="exclamation-sign"),
+                ).add_to(m)
 
-    # --- Conflict Detection ---
-    def detect_conflicts(data):
-        conflicts = []
-        for i in range(len(data)):
-            for j in range(i + 1, len(data)):
-                same_time = data.iloc[i]["time"] == data.iloc[j]["time"]
-                close_lat = abs(data.iloc[i]["latitude"] - data.iloc[j]["latitude"]) < 1.0
-                close_lon = abs(data.iloc[i]["longitude"] - data.iloc[j]["longitude"]) < 1.0
-                close_alt = abs(data.iloc[i]["altitude"] - data.iloc[j]["altitude"]) < 1000
-
-                if same_time and close_lat and close_lon and close_alt:
-                    conflicts.append({
-                        "flight_id": data.iloc[i]["flight_id"],
-                        "time": data.iloc[i]["time"],
-                        "latitude": data.iloc[i]["latitude"],
-                        "longitude": data.iloc[i]["longitude"],
-                        "altitude": data.iloc[i]["altitude"],
-                        "conflict_type": "Potential Conflict"
-                    })
-        return pd.DataFrame(conflicts)
-
-    conflicts = detect_conflicts(df)
-
-    if not conflicts.empty:
-        st.subheader("⚠️ Detected Conflicts")
-        st.dataframe(conflicts)
-
-        # --- Folium Map ---
-        st.subheader("🗺️ Conflict Map")
-        m = folium.Map(location=[20, 0], zoom_start=2)
-        cluster = MarkerCluster().add_to(m)
-
-        for _, row in conflicts.iterrows():
-            popup = f"""
-            <b>Flight:</b> {row['flight_id']}<br>
-            <b>Time:</b> {row['time']}<br>
-            <b>Altitude:</b> {row['altitude']} ft<br>
-            <b>Type:</b> {row['conflict_type']}
-            """
-            folium.CircleMarker(
-                location=[row["latitude"], row["longitude"]],
-                radius=6,
-                color="red",
-                fill=True,
-                fill_color="red",
-                fill_opacity=0.7,
-                popup=popup,
-            ).add_to(cluster)
-
-        m.save("/tmp/map.html")
-        components.html(open("/tmp/map.html", "r").read(), height=600)
-    else:
-        st.success("✅ No conflicts detected.")
-else:
-    st.info("Upload a CSV file to begin.")
+# Display map
+st_folium(m, width=1000, height=600)
