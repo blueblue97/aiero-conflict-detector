@@ -1,46 +1,62 @@
 import streamlit as st
-import pandas as pd
+from opensky_api import OpenSkyApi
+from geopy.distance import geodesic
 import folium
 from streamlit_folium import st_folium
-from opensky_fetch import fetch_opensky_data
-from sky_brain import detect_conflicts
 
-st.set_page_config(page_title="Aiero Conflict Detector", layout="wide")
-st.title("🧠 Aiero Conflict Detector — CSV & Real-Time Airspace")
+api = OpenSkyApi()
 
-uploaded_file = st.file_uploader("Upload CSV with flight data", type="csv")
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    st.subheader("📄 Flight Data")
-    st.dataframe(df)
+st.title("🛫 Flight Conflict Detector by Flight Number")
 
-    conflicts = detect_conflicts(df)
-    if conflicts:
-        st.warning("⚠️ Conflicts detected!")
+flight_number = st.text_input("Enter Flight Number (e.g., TP344)")
+
+if flight_number:
+    st.write(f"Searching for flight: **{flight_number.upper()}**")
+
+    # Get all states
+    states = api.get_states()
+
+    target = None
+    for s in states.states:
+        if s.callsign and flight_number.upper() in s.callsign.strip():
+            target = s
+            break
+
+    if target:
+        st.success(f"Found flight {target.callsign.strip()}")
+
+        lat, lon = target.latitude, target.longitude
+        alt = target.baro_altitude
+
+        st.write(f"Location: ({lat}, {lon}) at {alt} m")
+
+        # Map setup
+        m = folium.Map(location=[lat, lon], zoom_start=6)
+        folium.Marker([lat, lon], tooltip=f"{target.callsign.strip()} (Target)", icon=folium.Icon(color='red')).add_to(m)
+
+        # Search nearby flights
+        conflict_flights = []
+        for s in states.states:
+            if s != target and s.latitude and s.longitude:
+                dist = geodesic((lat, lon), (s.latitude, s.longitude)).km
+                if dist < 100:  # within 100 km
+                    alt_diff = abs((s.baro_altitude or 0) - (alt or 0))
+                    if alt_diff < 300:  # less than 300m vertical difference
+                        conflict_flights.append((s, dist, alt_diff))
+                        folium.Marker(
+                            [s.latitude, s.longitude],
+                            tooltip=f"{s.callsign.strip()} | Alt Diff: {alt_diff:.0f}m | {dist:.1f}km",
+                            icon=folium.Icon(color='orange')
+                        ).add_to(m)
+
+        st_folium(m, width=700)
+
+        st.subheader("⚠️ Potential Conflicts")
+        if conflict_flights:
+            for c, d, a in conflict_flights:
+                st.write(f"- {c.callsign.strip()} at ({c.latitude}, {c.longitude}) | Dist: {d:.1f} km | Alt Diff: {a:.0f} m")
+        else:
+            st.success("No nearby conflicts detected.")
+
     else:
-        st.success("✅ No conflicts detected.")
-
-    conflict_df = pd.DataFrame(conflicts)
-    if not conflict_df.empty:
-        st.subheader("🗺️ Conflict Map (CSV + Real-Time)")
-        m = folium.Map(location=[0, 0], zoom_start=2, tiles="cartodb dark_matter")
-
-        for row in conflict_df.itertuples():
-            folium.Marker(
-                location=[row.latitude, row.longitude],
-                popup=f"{row.flight_id} | Alt: {row.altitude}",
-                icon=folium.Icon(color="red")
-            ).add_to(m)
-
-        opensky_df = fetch_opensky_data()
-        for row in opensky_df.itertuples():
-            folium.CircleMarker(
-                location=[row.latitude, row.longitude],
-                radius=4,
-                popup=f"{row.callsign}",
-                color="blue",
-                fill=True,
-                fill_opacity=0.4
-            ).add_to(m)
-
-        st_folium(m, height=600)
+        st.error("Flight not found.")
